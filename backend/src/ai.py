@@ -12,6 +12,16 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
+try:
+    # pydantic-ai >=2.x ships a dedicated OpenRouter model/provider
+    # (base URL is fixed to OpenRouter; falls back to OPENROUTER_API_KEY env).
+    from pydantic_ai.models.openrouter import OpenRouterModel as _OpenRouterModel
+    from pydantic_ai.providers.openrouter import OpenRouterProvider as _OpenRouterProvider
+    _OPENROUTER_CUSTOM_BASE_URL = False
+except ImportError:  # pydantic-ai 1.x: use the OpenAI-compatible model/provider
+    from pydantic_ai.models.openai import OpenAIModel as _OpenRouterModel
+    from pydantic_ai.providers.openai import OpenAIProvider as _OpenRouterProvider
+    _OPENROUTER_CUSTOM_BASE_URL = True
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from .config import Config, get_config
@@ -360,7 +370,7 @@ Find 2-5 compelling segments that would work well as standalone clips. Quality o
 _transcript_agent: Optional[Agent[None, TranscriptAnalysis]] = None
 _transcript_agent_signature: Optional[tuple[str | None, ...]] = None
 
-SUPPORTED_LLM_PROVIDERS = {"google", "google-gla", "openai", "anthropic", "ollama"}
+SUPPORTED_LLM_PROVIDERS = {"google", "google-gla", "openai", "anthropic", "ollama", "openrouter"}
 
 
 def _split_llm_name(model_name: str) -> tuple[str, str | None]:
@@ -378,7 +388,7 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
     if provider not in SUPPORTED_LLM_PROVIDERS:
         return (
             f"Unsupported LLM provider '{provider}'. "
-            "Use google-gla:*, openai:*, anthropic:*, or ollama:*."
+            "Use google-gla:*, openai:*, anthropic:*, ollama:*, or openrouter:*."
         )
 
     if not provider_model_name:
@@ -410,18 +420,40 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
         # are optional and passed through as environment variables.
         return None
 
+    if provider == "openrouter":
+        if not runtime_config.openrouter_api_key:
+            return (
+                "Selected LLM provider is OpenRouter, but OPENROUTER_API_KEY is not set. "
+                "Set OPENROUTER_API_KEY or choose another provider with a matching API key."
+            )
+        return None
+
     return None
 
 
 def _build_transcript_model(runtime_config: Config) -> Model | str:
     provider, provider_model_name = _split_llm_name(runtime_config.llm)
-    if provider != "ollama":
+    if provider not in ("ollama", "openrouter"):
         return runtime_config.llm
 
     if not provider_model_name:
         raise RuntimeError(
-            "Selected LLM provider is Ollama, but no model name was provided. "
-            "Use the format ollama:<model>, for example ollama:gpt-oss:20b."
+            f"Selected LLM provider '{provider}' requires a model name, "
+            "e.g. ollama:gpt-oss:20b or openrouter:deepseek/deepseek-chat."
+        )
+
+    if provider == "openrouter":
+        if _OPENROUTER_CUSTOM_BASE_URL:
+            return _OpenRouterModel(
+                provider_model_name,
+                provider=_OpenRouterProvider(
+                    base_url=runtime_config.openrouter_base_url,
+                    api_key=runtime_config.openrouter_api_key,
+                ),
+            )
+        return _OpenRouterModel(
+            provider_model_name,
+            provider=_OpenRouterProvider(api_key=runtime_config.openrouter_api_key),
         )
 
     return OllamaModel(
@@ -445,6 +477,8 @@ def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:
         runtime_config.anthropic_api_key,
         runtime_config.ollama_base_url,
         runtime_config.ollama_api_key,
+        runtime_config.openrouter_api_key,
+        runtime_config.openrouter_base_url,
     )
     if _transcript_agent is None or _transcript_agent_signature != signature:
         apply_settings_to_process_env(runtime_config.as_runtime_settings())

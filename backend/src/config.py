@@ -18,6 +18,10 @@ class Config:
         self.youtube_data_api_key = self._get_runtime_setting("YOUTUBE_DATA_API_KEY")
         self.ollama_base_url = self._get_runtime_setting("OLLAMA_BASE_URL")
         self.ollama_api_key = self._get_runtime_setting("OLLAMA_API_KEY")
+        self.openrouter_api_key = self._get_runtime_setting("OPENROUTER_API_KEY")
+        self.openrouter_base_url = (
+            self._get_runtime_setting("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+        )
 
         self.whisper_model = os.getenv("WHISPER_MODEL", "base")
         self.transcription_provider = self._normalize_transcription_provider(
@@ -161,6 +165,8 @@ class Config:
             "ANTHROPIC_API_KEY": self.anthropic_api_key,
             "OLLAMA_BASE_URL": self.ollama_base_url,
             "OLLAMA_API_KEY": self.ollama_api_key,
+            "OPENROUTER_API_KEY": self.openrouter_api_key,
+            "OPENROUTER_BASE_URL": self.openrouter_base_url,
             "YOUTUBE_DATA_API_KEY": self.youtube_data_api_key,
             "APIFY_API_TOKEN": self.apify_api_token,
             "PEXELS_API_KEY": self.pexels_api_key,
@@ -230,6 +236,8 @@ class Config:
         Infer a usable default model based on whichever API key is present.
         Falls back to Google for backward compatibility.
         """
+        if self.openrouter_api_key:
+            return "openrouter:deepseek/deepseek-chat"
         if self.google_api_key:
             return "google-gla:gemini-3-flash-preview"
         if self.openai_api_key:
